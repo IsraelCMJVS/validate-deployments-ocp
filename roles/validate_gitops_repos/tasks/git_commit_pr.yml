@@ -54,7 +54,7 @@
 
     - name: Create PR in GitHub
       when: scm_provider == "github"
-      no_log: true
+      no_log: false
       ansible.builtin.uri:
         url: "https://api.github.com/repos/{{ _repo_owner }}/{{ _repo_slug }}/pulls"
         method: POST
