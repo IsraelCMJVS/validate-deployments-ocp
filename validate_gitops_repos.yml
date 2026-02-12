@@ -2,8 +2,6 @@
   hosts: invd-ts-ansible
   gather_facts: true
   become: true
-  vars_files:
-    - ./roles/validate_gitops_repos/vars.yml
 
   roles:
     - role: validate_gitops_repos

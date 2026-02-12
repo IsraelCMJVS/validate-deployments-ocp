@@ -6,8 +6,13 @@
       - scm_token | length > 0
       - gitops_repos is iterable
       - prod_folder != drp_folder
+
     fail_msg: "Faltan vars: scm_provider/scm_username/scm_token/repos o prod_folder=drp_folder."
 
+- name: Normalize scm_create_pr to boolean
+  ansible.builtin.set_fact:
+    scm_create_pr: "{{ scm_create_pr | bool }}"
+    
 - import_tasks: prereqs.yml
 - import_tasks: report.yml
 
