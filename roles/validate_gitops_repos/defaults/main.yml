@@ -34,9 +34,10 @@ replica_kinds:
 # Paths
 workdir_root: "/tmp/ansible_validate_deployments"
 report_root: "/reportes_ansible/validate_deployments"
-inventory_name: "{{ lookup('env','INVENTORY_NAME') | default('default_inventory') }}"
+inventory_name: "{{ lookup('env','INVENTORY_NAME') | default('default_inventory', true) }}"
 run_ts: "{{ lookup('pipe','date +%Y%m%d_%H%M%S') }}"
-report_csv: "{{ report_root }}/{{ inventory_name }}_{{ run_ts }}.csv"
+report_csv: "{{ report_root }}/deployments_report_{{ git_branch }}_{{ prod_folder }}-to-{{ drp_folder }}_{{ run_ts }}.csv"
+
 
 # PR
 pr_branch_prefix: "ansible/homologate"

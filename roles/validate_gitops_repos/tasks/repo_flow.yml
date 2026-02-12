@@ -28,6 +28,10 @@
         {{ github_owner if (github_owner | length > 0) else _gh_owner_from_url }}
       {% endif %}
 
+- name: Sanitize owner and slug
+  ansible.builtin.set_fact:
+    _repo_owner: "{{ _repo_owner | trim }}"
+    _repo_slug: "{{ _repo_slug | trim }}"
 
 - name: Assert owner/workspace can be determined
   ansible.builtin.assert:
