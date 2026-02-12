@@ -1,0 +1,51 @@
+# ================================
+# SCM Provider
+# ================================
+# Cambia a "github" si tus repos de prueba están en GitHub
+scm_provider: "github"
+
+# Crear PR automáticamente
+scm_create_pr: true
+
+# ================================
+# Rama a validar
+# ================================
+git_branch: "qa"
+
+# ================================
+# Carpetas PROD / DRP
+# (Cambia aquí para probar failover)
+# ================================
+prod_folder: "dc1"
+drp_folder: "dc2"
+
+# ================================
+# Repos de prueba
+# ================================
+gitops_repos:
+  - url: "https://github.com/IsraelCMJVS/demo-gitops-app1.git"
+    name: "demo-gitops-app1"
+
+  - url: "https://github.com/IsraelCMJVS/demo-gitops-app2-exclusion.git"
+    name: "demo-gitops-app2-exclusion"
+
+# ================================
+# Exclusión de replicas 
+# ================================
+replicas_exclusion_repos:
+  - "demo-gitops-app2-exclusion"
+
+# ================================
+# Opcional (solo si usas GitHub)
+# ================================
+# github_owner: "TU_ORG"
+
+# ================================
+# Opcional (solo si usas Bitbucket y quieres forzarlo)
+# ================================
+# bitbucket_workspace: "TU_WORKSPACE"
+
+# ================================
+# (Opcional futuro) Dry-run
+# ================================
+# dry_run: false
