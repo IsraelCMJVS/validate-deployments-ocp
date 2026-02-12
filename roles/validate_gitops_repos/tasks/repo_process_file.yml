@@ -36,6 +36,7 @@
     src: "{{ _prod_file }}"
     dest: "{{ _drp_file }}"
     mode: "0644"
+    remote_src: true
   when: not _st_drp.stat.exists and not _is_yaml
 
 - name: Copy PROD -> DRP when missing (yaml, fallback if not secret)
@@ -43,6 +44,7 @@
     src: "{{ _prod_file }}"
     dest: "{{ _drp_file }}"
     mode: "0644"
+    remote_src: true
   when: (not _st_drp.stat.exists) and _is_yaml and (_create_secret is not defined or _create_secret.stdout is not search('CHANGED=1'))
 
 - name: Patch replicas=0 for excluded repos on newly created DRP yaml
@@ -113,6 +115,7 @@
         src: "{{ _prod_file }}"
         dest: "{{ _drp_file }}"
         mode: "0644"
+        remote_src: true
       when: (_yaml_diff.rc != 0) and (_is_secret_kind.rc != 0)
 
     - name: Patch replicas=0 for excluded repos (DRP only)
@@ -165,6 +168,7 @@
         src: "{{ _prod_file }}"
         dest: "{{ _drp_file }}"
         mode: "0644"
+        remote_src: true
       when: _diff_text.rc != 0
 
     - name: Report non-YAML
