@@ -1,0 +1,149 @@
+- name: Derive repo_name and slug
+  ansible.builtin.set_fact:
+    _repo_name: "{{ repo.name | default(repo.url | regex_replace('^.*/([^/]+?)(\\.git)?$', '\\1')) }}"
+    _repo_slug: "{{ repo.url | regex_replace('^.*/([^/]+?)(\\.git)?$', '\\1') }}"
+    _repo_dest: "{{ workdir_root }}/{{ repo.name | default(repo.url | regex_replace('^.*/([^/]+?)(\\.git)?$', '\\1')) }}"
+    _prod_path: "{{ workdir_root }}/{{ repo.name | default(repo.url | regex_replace('^.*/([^/]+?)(\\.git)?$', '\\1')) }}/{{ prod_folder }}"
+    _drp_path: "{{ workdir_root }}/{{ repo.name | default(repo.url | regex_replace('^.*/([^/]+?)(\\.git)?$', '\\1')) }}/{{ drp_folder }}"
+    _pr_branch: "{{ pr_branch_prefix }}/{{ git_branch }}/{{ run_ts }}-{{ (repo.name | default(repo.url | regex_replace('^.*/([^/]+?)(\\.git)?$', '\\1'))) | regex_replace('[^a-zA-Z0-9_.-]','-') }}"
+    _repo_is_replica_excluded: "{{ (repo.name | default(repo.url | regex_replace('^.*/([^/]+?)(\\.git)?$', '\\1'))) in replicas_exclusion_repos }}"
+  vars:
+    _dummy: true
+
+# Provider parsing for PR creation
+- name: Parse repo owner/workspace from URL (best-effort)
+  ansible.builtin.set_fact:
+    _bb_workspace_from_url: "{{ (repo.url | regex_search('bitbucket\\.org/([^/]+)/', '\\1')) | default('') }}"
+    _gh_owner_from_url: "{{ (repo.url | regex_search('github\\.com/([^/]+)/', '\\1')) | default('') }}"
+    _scm_host: "{{ 'bitbucket.org' if scm_provider == 'bitbucket' else 'github.com' }}"
+    _repo_owner: >-
+      {{
+        (scm_provider == 'bitbucket')
+        | ternary(
+            (bitbucket_workspace | length > 0) | ternary(bitbucket_workspace, _bb_workspace_from_url),
+            (github_owner | length > 0) | ternary(github_owner, _gh_owner_from_url)
+          )
+      }}
+
+- name: Assert owner/workspace can be determined
+  ansible.builtin.assert:
+    that:
+      - _repo_owner | length > 0
+    fail_msg: "No pude determinar owner/workspace desde URL ni vars. Define bitbucket_workspace o github_owner."
+
+# Clean dir
+- name: Clean existing local repo dir
+  ansible.builtin.file:
+    path: "{{ _repo_dest }}"
+    state: absent
+
+# Create temp HOME for netrc
+- name: Create temp HOME for netrc
+  ansible.builtin.tempfile:
+    state: directory
+    path: "{{ workdir_root }}"
+    prefix: "home_{{ _repo_name }}_"
+  register: _tmp_home
+
+- name: Write .netrc (SCM auth) in temp HOME
+  no_log: true
+  ansible.builtin.copy:
+    dest: "{{ _tmp_home.path }}/.netrc"
+    mode: "0600"
+    content: |
+      machine {{ _scm_host }}
+        login {{ scm_username }}
+        password {{ scm_token }}
+
+# Clone without embedding creds in URL
+- name: Clone repo (provider-aware, auth via .netrc)
+  ansible.builtin.git:
+    repo: "{{ repo.url }}"
+    dest: "{{ _repo_dest }}"
+    version: "{{ git_branch }}"
+    force: true
+  environment:
+    HOME: "{{ _tmp_home.path }}"
+
+- name: Verify prod/drp folders exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: _stat_paths
+  loop:
+    - "{{ _prod_path }}"
+    - "{{ _drp_path }}"
+
+- name: Fail if prod/drp folder missing
+  ansible.builtin.assert:
+    that:
+      - _stat_paths.results[0].stat.exists
+      - _stat_paths.results[1].stat.exists
+    fail_msg: "No existe prod/drp folder en {{ _repo_name }}. prod={{ _prod_path }}, drp={{ _drp_path }}"
+
+- name: Create working branch for PR
+  ansible.builtin.command:
+    cmd: "git checkout -b {{ _pr_branch }}"
+    chdir: "{{ _repo_dest }}"
+
+# -------------------------
+# Build file lists
+# -------------------------
+- name: Find files in PROD
+  ansible.builtin.find:
+    paths: "{{ _prod_path }}"
+    recurse: true
+    file_type: file
+  register: _prod_files
+
+- name: Find files in DRP
+  ansible.builtin.find:
+    paths: "{{ _drp_path }}"
+    recurse: true
+    file_type: file
+  register: _drp_files
+
+- name: Build relative path sets
+  ansible.builtin.set_fact:
+    _prod_rel: "{{ _prod_files.files | map(attribute='path') | map('regex_replace', '^' + (_prod_path | regex_escape) + '/', '') | list }}"
+    _drp_rel:  "{{ _drp_files.files  | map(attribute='path') | map('regex_replace', '^' + (_drp_path  | regex_escape) + '/', '') | list }}"
+
+# -------------------------
+# DRP-only files: report only
+# -------------------------
+- name: Report DRP-only files (no action)
+  ansible.builtin.set_fact:
+    report_rows: "{{ report_rows + [ {
+      'timestamp': run_ts,
+      'repo_name': _repo_name,
+      'repo_url': repo.url,
+      'branch': git_branch,
+      'prod_folder': prod_folder,
+      'drp_folder': drp_folder,
+      'file': item,
+      'change_type': 'EXTRA_IN_DRP',
+      'action': 'REPORTED_ONLY',
+      'replicas_policy': (_repo_is_replica_excluded | ternary('KEEP_0_IN_DRP','NORMAL')),
+      'pr_url': ''
+    } ] }}"
+  loop: "{{ _drp_rel | difference(_prod_rel) }}"
+
+# -------------------------
+# Process PROD files
+# -------------------------
+- name: Process PROD files (copy/compare/homologate)
+  ansible.builtin.include_tasks: repo_process_file.yml
+  loop: "{{ _prod_rel }}"
+  loop_control:
+    loop_var: relpath
+
+# -------------------------
+# Commit / PR
+# -------------------------
+- import_tasks: git_commit_pr.yml
+
+# Cleanup temp HOME
+- name: Cleanup temp HOME
+  ansible.builtin.file:
+    path: "{{ _tmp_home.path }}"
+    state: absent
+  when: _tmp_home.path is defined

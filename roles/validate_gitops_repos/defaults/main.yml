@@ -1,0 +1,44 @@
+# =========================
+# SCM Provider
+# =========================
+scm_provider: "bitbucket"   # bitbucket | github
+scm_create_pr: true
+
+# Credenciales (idealmente inyectadas por AAP Custom Credential como env vars)
+scm_username: "{{ lookup('env','SCM_USERNAME') | default('') }}"
+scm_token: "{{ lookup('env','SCM_TOKEN') | default('') }}"
+
+# Bitbucket Cloud (workspace requerido si el URL no lo incluye o quieres forzarlo)
+bitbucket_workspace: "{{ lookup('env','BITBUCKET_WORKSPACE') | default('') }}"
+
+# GitHub owner/org (si el URL no lo incluye o quieres forzarlo)
+github_owner: "{{ lookup('env','GITHUB_OWNER') | default('') }}"
+
+# =========================
+# GitOps repos list
+# =========================
+gitops_repos: []
+git_branch: "qa"
+
+# Carpetas a comparar
+prod_folder: "dc1"
+drp_folder: "dc2"
+
+# Exclusiones de replicas
+replicas_exclusion_repos: []
+replica_kinds:
+  - Deployment
+  - DeploymentConfig
+  - StatefulSet
+
+# Paths
+workdir_root: "/tmp/ansible_validate_deployments"
+report_root: "/reportes_ansible/validate_deployments"
+inventory_name: "{{ lookup('env','INVENTORY_NAME') | default('default_inventory') }}"
+run_ts: "{{ lookup('pipe','date +%Y%m%d_%H%M%S') }}"
+report_csv: "{{ report_root }}/{{ inventory_name }}_{{ run_ts }}.csv"
+
+# PR
+pr_branch_prefix: "ansible/homologate"
+pr_title_prefix: "[Ansible] Homologación PROD->DRP"
+pr_description: "PR generado automáticamente para homologar configuración DRP con PROD."

@@ -1,0 +1,7 @@
+- name: Validate & Homologate GitOps repos (PROD -> DRP)
+  hosts: invd-ts-ansible
+  gather_facts: true
+  become: true
+
+  roles:
+    - role: validate_gitops_repos

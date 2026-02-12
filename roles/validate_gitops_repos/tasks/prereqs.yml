@@ -1,0 +1,31 @@
+- name: Ensure workdir and report dir exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ workdir_root }}"
+    - "{{ report_root }}"
+
+- name: Install base packages (best-effort)
+  ansible.builtin.package:
+    name:
+      - git
+      - python3
+      - python3-pip
+    state: present
+
+- name: Ensure PyYAML is available
+  ansible.builtin.pip:
+    name: pyyaml
+    state: present
+
+- name: Place helper scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ workdir_root }}/{{ item | basename }}"
+    mode: "0755"
+  loop:
+    - "sync_secrets_keys.py"
+    - "patch_replicas.py"
+    - "yaml_diff_normalize.py"

@@ -1,0 +1,28 @@
+- name: Validate required variables
+  ansible.builtin.assert:
+    that:
+      - scm_provider in ['bitbucket','github']
+      - scm_username | length > 0
+      - scm_token | length > 0
+      - gitops_repos is iterable
+      - prod_folder != drp_folder
+    fail_msg: "Faltan vars: scm_provider/scm_username/scm_token/repos o prod_folder=drp_folder."
+
+- import_tasks: prereqs.yml
+- import_tasks: report.yml
+
+- name: Iterate repositories
+  ansible.builtin.include_tasks: repo_flow.yml
+  loop: "{{ gitops_repos }}"
+  loop_control:
+    loop_var: repo
+
+- name: Write CSV report
+  ansible.builtin.template:
+    src: report.csv.j2
+    dest: "{{ report_csv }}"
+    mode: "0644"
+
+- name: Show report path
+  ansible.builtin.debug:
+    msg: "Reporte generado en: {{ report_csv }}"

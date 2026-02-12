@@ -1,0 +1,3 @@
+- name: Initialize report rows
+  ansible.builtin.set_fact:
+    report_rows: []

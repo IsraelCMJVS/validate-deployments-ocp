@@ -1,0 +1,4 @@
+timestamp,repo_name,repo_url,branch,prod_folder,drp_folder,file,change_type,action,replicas_policy,pr_url
+{% for r in report_rows -%}
+{{ r.timestamp | replace(',', ' ') }},{{ r.repo_name | replace(',', ' ') }},{{ r.repo_url | replace(',', ' ') }},{{ r.branch }},{{ r.prod_folder }},{{ r.drp_folder }},{{ r.file | replace(',', ' ') }},{{ r.change_type }},{{ r.action }},{{ r.replicas_policy }},{{ r.pr_url | replace(',', ' ') }}
+{% endfor %}

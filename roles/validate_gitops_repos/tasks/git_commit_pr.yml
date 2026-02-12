@@ -1,0 +1,112 @@
+- name: Check git status
+  ansible.builtin.command:
+    cmd: "git status --porcelain"
+    chdir: "{{ _repo_dest }}"
+  register: _git_status
+  changed_when: false
+
+- name: Set flag repo_has_changes
+  ansible.builtin.set_fact:
+    _repo_has_changes: "{{ (_git_status.stdout | trim) | length > 0 }}"
+
+- name: Commit changes (if any)
+  ansible.builtin.command:
+    cmd: "git commit -am \"{{ pr_title_prefix }} ({{ prod_folder }}->{{ drp_folder }})\""
+    chdir: "{{ _repo_dest }}"
+  when: _repo_has_changes
+  changed_when: true
+
+- name: Push branch (if any) using .netrc temp HOME
+  ansible.builtin.command:
+    cmd: "git push origin {{ _pr_branch }}"
+    chdir: "{{ _repo_dest }}"
+  when: _repo_has_changes
+  environment:
+    HOME: "{{ _tmp_home.path }}"
+  changed_when: true
+
+- name: Create PR (provider-aware)
+  when: _repo_has_changes and scm_create_pr
+  block:
+
+    - name: Create PR in Bitbucket Cloud
+      when: scm_provider == "bitbucket"
+      no_log: true
+      ansible.builtin.uri:
+        url: "https://api.bitbucket.org/2.0/repositories/{{ _repo_owner }}/{{ _repo_slug }}/pullrequests"
+        method: POST
+        user: "{{ scm_username }}"
+        password: "{{ scm_token }}"
+        force_basic_auth: true
+        status_code: [200, 201]
+        body_format: json
+        body:
+          title: "{{ pr_title_prefix }}: {{ _repo_name }} ({{ prod_folder }}->{{ drp_folder }})"
+          description: "{{ pr_description }}"
+          source:
+            branch:
+              name: "{{ _pr_branch }}"
+          destination:
+            branch:
+              name: "{{ git_branch }}"
+          close_source_branch: false
+      register: _pr_resp
+
+    - name: Create PR in GitHub
+      when: scm_provider == "github"
+      no_log: true
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ _repo_owner }}/{{ _repo_slug }}/pulls"
+        method: POST
+        status_code: [200, 201]
+        headers:
+          Authorization: "token {{ scm_token }}"
+          Accept: "application/vnd.github+json"
+        body_format: json
+        body:
+          title: "{{ pr_title_prefix }}: {{ _repo_name }} ({{ prod_folder }}->{{ drp_folder }})"
+          body: "{{ pr_description }}"
+          head: "{{ _repo_owner }}:{{ _pr_branch }}"
+          base: "{{ git_branch }}"
+      register: _gh_pr_resp
+
+    - name: Extract PR URL (Bitbucket or GitHub)
+      ansible.builtin.set_fact:
+        _pr_url: >-
+          {{
+            (scm_provider == 'bitbucket')
+            | ternary(_pr_resp.json.links.html.href, _gh_pr_resp.json.html_url)
+          }}
+
+    - name: Append PR row entry
+      ansible.builtin.set_fact:
+        report_rows: "{{ report_rows + [ {
+          'timestamp': run_ts,
+          'repo_name': _repo_name,
+          'repo_url': repo.url,
+          'branch': git_branch,
+          'prod_folder': prod_folder,
+          'drp_folder': drp_folder,
+          'file': '',
+          'change_type': 'PR_CREATED',
+          'action': 'PR_CREATED',
+          'replicas_policy': (_repo_is_replica_excluded | ternary('KEEP_0_IN_DRP','NORMAL')),
+          'pr_url': _pr_url
+        } ] }}"
+
+  rescue:
+    - name: Report PR creation failure
+      ansible.builtin.set_fact:
+        report_rows: "{{ report_rows + [ {
+          'timestamp': run_ts,
+          'repo_name': _repo_name,
+          'repo_url': repo.url,
+          'branch': git_branch,
+          'prod_folder': prod_folder,
+          'drp_folder': drp_folder,
+          'file': '',
+          'change_type': 'PR_CREATE_FAILED',
+          'action': 'REPORTED_ONLY',
+          'replicas_policy': (_repo_is_replica_excluded | ternary('KEEP_0_IN_DRP','NORMAL')),
+          'pr_url': ''
+        } ] }}"

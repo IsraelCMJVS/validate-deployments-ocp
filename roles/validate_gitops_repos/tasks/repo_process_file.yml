@@ -1,0 +1,183 @@
+- name: Compute absolute paths
+  ansible.builtin.set_fact:
+    _prod_file: "{{ _prod_path }}/{{ relpath }}"
+    _drp_file: "{{ _drp_path }}/{{ relpath }}"
+    _is_yaml: "{{ relpath | lower is match('.*\\.(yml|yaml)$') }}"
+    _looks_like_secret_path: "{{ (relpath is search('(^|/)secret(s)?/')) }}"
+
+- name: Stat DRP file
+  ansible.builtin.stat:
+    path: "{{ _drp_file }}"
+  register: _st_drp
+
+- name: Ensure target directory exists when needed
+  ansible.builtin.file:
+    path: "{{ _drp_file | dirname }}"
+    state: directory
+    mode: "0755"
+  when: not _st_drp.stat.exists
+
+# -------------------------
+# Missing in DRP
+# -------------------------
+- name: Create DRP secret skeleton (keys-only) if missing (yaml)
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ workdir_root }}/sync_secrets_keys.py
+      --mode create
+      --prod "{{ _prod_file }}"
+      --drp "{{ _drp_file }}"
+  when: (not _st_drp.stat.exists) and _is_yaml
+  register: _create_secret
+  changed_when: _create_secret.stdout is search('CHANGED=1')
+
+- name: Copy PROD -> DRP when missing (non-yaml)
+  ansible.builtin.copy:
+    src: "{{ _prod_file }}"
+    dest: "{{ _drp_file }}"
+    mode: "0644"
+  when: not _st_drp.stat.exists and not _is_yaml
+
+- name: Copy PROD -> DRP when missing (yaml, fallback if not secret)
+  ansible.builtin.copy:
+    src: "{{ _prod_file }}"
+    dest: "{{ _drp_file }}"
+    mode: "0644"
+  when: (not _st_drp.stat.exists) and _is_yaml and (_create_secret is not defined or _create_secret.stdout is not search('CHANGED=1'))
+
+- name: Patch replicas=0 for excluded repos on newly created DRP yaml
+  ansible.builtin.command:
+    cmd: >
+      python3 {{ workdir_root }}/patch_replicas.py
+      --file "{{ _drp_file }}"
+      --kinds "{{ replica_kinds | join(',') }}"
+      --replicas 0
+  when: (not _st_drp.stat.exists) and _is_yaml and _repo_is_replica_excluded
+  register: _rep_patch_new
+  changed_when: _rep_patch_new.stdout is search('CHANGED=1')
+
+- name: Report missing-in-DRP
+  ansible.builtin.set_fact:
+    report_rows: "{{ report_rows + [ {
+      'timestamp': run_ts,
+      'repo_name': _repo_name,
+      'repo_url': repo.url,
+      'branch': git_branch,
+      'prod_folder': prod_folder,
+      'drp_folder': drp_folder,
+      'file': relpath,
+      'change_type': 'MISSING_IN_DRP',
+      'action': (_is_yaml | ternary('CREATED_OR_COPIED','COPIED')),
+      'replicas_policy': (_repo_is_replica_excluded | ternary('KEEP_0_IN_DRP','NORMAL')),
+      'pr_url': ''
+    } ] }}"
+  when: not _st_drp.stat.exists
+
+# -------------------------
+# Exists in DRP
+# -------------------------
+- name: Process existing YAML
+  when: _st_drp.stat.exists and _is_yaml
+  block:
+    - name: Sync secret keys only (no values overwrite) if YAML contains Secret
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ workdir_root }}/sync_secrets_keys.py
+          --mode sync
+          --prod "{{ _prod_file }}"
+          --drp "{{ _drp_file }}"
+      register: _secret_sync
+      changed_when: _secret_sync.stdout is search('CHANGED=1')
+
+    - name: Check yaml diff normalized
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ workdir_root }}/yaml_diff_normalize.py
+          --a "{{ _prod_file }}"
+          --b "{{ _drp_file }}"
+      register: _yaml_diff
+      changed_when: false
+
+    # Overwrite for non-secret diffs: yaml_diff_normalize returns rc!=0 if different;
+    # BUT if file is Secret, we must not overwrite values. We'll only overwrite if the file is NOT a Secret.
+    - name: Detect whether PROD yaml is a Secret (cheap heuristic via grep)
+      ansible.builtin.command:
+        cmd: "grep -qE '^kind:\\s*Secret\\b' '{{ _prod_file }}'"
+      register: _is_secret_kind
+      failed_when: false
+      changed_when: false
+
+    - name: Overwrite DRP with PROD if different AND not Secret
+      ansible.builtin.copy:
+        src: "{{ _prod_file }}"
+        dest: "{{ _drp_file }}"
+        mode: "0644"
+      when: (_yaml_diff.rc != 0) and (_is_secret_kind.rc != 0)
+
+    - name: Patch replicas=0 for excluded repos (DRP only)
+      ansible.builtin.command:
+        cmd: >
+          python3 {{ workdir_root }}/patch_replicas.py
+          --file "{{ _drp_file }}"
+          --kinds "{{ replica_kinds | join(',') }}"
+          --replicas 0
+      register: _rep_patch
+      when: _repo_is_replica_excluded
+      changed_when: _rep_patch.stdout is search('CHANGED=1')
+
+    - name: Report YAML result
+      ansible.builtin.set_fact:
+        report_rows: "{{ report_rows + [ {
+          'timestamp': run_ts,
+          'repo_name': _repo_name,
+          'repo_url': repo.url,
+          'branch': git_branch,
+          'prod_folder': prod_folder,
+          'drp_folder': drp_folder,
+          'file': relpath,
+          'change_type': (
+            (_is_secret_kind.rc == 0 and (_secret_sync.stdout is search('CHANGED=1'))) | ternary('DIFF','NO_CHANGE')
+          ) if (_is_secret_kind.rc == 0) else (
+            (_yaml_diff.rc != 0) | ternary('DIFF','NO_CHANGE')
+          ),
+          'action': (
+            (_is_secret_kind.rc == 0 and (_secret_sync.stdout is search('CHANGED=1'))) | ternary('SYNC_KEYS_ONLY','SKIPPED')
+          ) if (_is_secret_kind.rc == 0) else (
+            (_yaml_diff.rc != 0) | ternary('OVERWRITTEN','SKIPPED')
+          ),
+          'replicas_policy': (_repo_is_replica_excluded | ternary('KEEP_0_IN_DRP','NORMAL')),
+          'pr_url': ''
+        } ] }}"
+
+- name: Process existing non-YAML
+  when: _st_drp.stat.exists and not _is_yaml
+  block:
+    - name: Diff text files
+      ansible.builtin.command:
+        cmd: "diff -q '{{ _prod_file }}' '{{ _drp_file }}'"
+      register: _diff_text
+      changed_when: false
+      failed_when: false
+
+    - name: Overwrite DRP with PROD if different
+      ansible.builtin.copy:
+        src: "{{ _prod_file }}"
+        dest: "{{ _drp_file }}"
+        mode: "0644"
+      when: _diff_text.rc != 0
+
+    - name: Report non-YAML
+      ansible.builtin.set_fact:
+        report_rows: "{{ report_rows + [ {
+          'timestamp': run_ts,
+          'repo_name': _repo_name,
+          'repo_url': repo.url,
+          'branch': git_branch,
+          'prod_folder': prod_folder,
+          'drp_folder': drp_folder,
+          'file': relpath,
+          'change_type': (_diff_text.rc != 0) | ternary('DIFF','NO_CHANGE'),
+          'action': (_diff_text.rc != 0) | ternary('OVERWRITTEN','SKIPPED'),
+          'replicas_policy': (_repo_is_replica_excluded | ternary('KEEP_0_IN_DRP','NORMAL')),
+          'pr_url': ''
+        } ] }}"
