@@ -10,20 +10,24 @@
   vars:
     _dummy: true
 
-# Provider parsing for PR creation
-- name: Parse repo owner/workspace from URL (best-effort)
+- name: Extract owner/workspace from URL safely
   ansible.builtin.set_fact:
     _bb_workspace_from_url: "{{ (repo.url | regex_search('bitbucket\\.org/([^/]+)/', '\\1')) | default('') }}"
     _gh_owner_from_url: "{{ (repo.url | regex_search('github\\.com/([^/]+)/', '\\1')) | default('') }}"
+
+- name: Define SCM host
+  ansible.builtin.set_fact:
     _scm_host: "{{ 'bitbucket.org' if scm_provider == 'bitbucket' else 'github.com' }}"
+
+- name: Determine repository owner/workspace
+  ansible.builtin.set_fact:
     _repo_owner: >-
-      {{
-        (scm_provider == 'bitbucket')
-        | ternary(
-            (bitbucket_workspace | length > 0) | ternary(bitbucket_workspace, _bb_workspace_from_url),
-            (github_owner | length > 0) | ternary(github_owner, _gh_owner_from_url)
-          )
-      }}
+      {% if scm_provider == 'bitbucket' %}
+        {{ bitbucket_workspace if (bitbucket_workspace | length > 0) else _bb_workspace_from_url }}
+      {% else %}
+        {{ github_owner if (github_owner | length > 0) else _gh_owner_from_url }}
+      {% endif %}
+
 
 - name: Assert owner/workspace can be determined
   ansible.builtin.assert:

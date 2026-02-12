@@ -38,7 +38,7 @@ replicas_exclusion_repos:
 # ================================
 # Opcional (solo si usas GitHub)
 # ================================
-# github_owner: "TU_ORG"
+github_owner: "IsraelCMJVS"
 
 # ================================
 # Opcional (solo si usas Bitbucket y quieres forzarlo)
