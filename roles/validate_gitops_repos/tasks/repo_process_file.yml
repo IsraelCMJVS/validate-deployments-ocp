@@ -97,6 +97,7 @@
           --b "{{ _drp_file }}"
       register: _yaml_diff
       changed_when: false
+      failed_when: false
 
     # Overwrite for non-secret diffs: yaml_diff_normalize returns rc!=0 if different;
     # BUT if file is Secret, we must not overwrite values. We'll only overwrite if the file is NOT a Secret.
