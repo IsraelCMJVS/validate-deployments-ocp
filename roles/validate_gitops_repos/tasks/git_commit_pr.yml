@@ -38,7 +38,7 @@
         user: "{{ scm_username }}"
         password: "{{ scm_token }}"
         force_basic_auth: true
-        status_code: [200, 201]
+        status_code: [200, 201, 202]
         body_format: json
         body:
           title: "{{ pr_title_prefix }}: {{ _repo_name }} ({{ prod_folder }}->{{ drp_folder }})"
@@ -58,7 +58,7 @@
       ansible.builtin.uri:
         url: "https://api.github.com/repos/{{ _repo_owner }}/{{ _repo_slug }}/pulls"
         method: POST
-        status_code: [200, 201]
+        status_code: [200, 201, 202]
         headers:
           Authorization: "token {{ scm_token }}"
           Accept: "application/vnd.github+json"
